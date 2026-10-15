@@ -37,38 +37,112 @@ def _cmd_search(args):
 
 
 def _cmd_create(args):
+    import os
+
     from . import browser, listing
 
-    for p in args.images:
-        pass
-    desc = open(args.desc_file, encoding="utf-8").read() if args.desc_file else args.desc
+    desc = open(args.desc_file, encoding="utf-8").read() if args.desc_file else (args.desc or "")
+    images = [os.path.abspath(os.path.expanduser(p)) for p in args.images]
+    missing = [p for p in images if not os.path.exists(p)]
+    if missing:
+        print("image not found: " + ", ".join(missing))
+        return 2
+
     item = listing.Listing(
         title=args.title,
         price=args.price,
-        description=desc or "",
-        images=args.images,
+        description=desc,
+        images=images,
         postcode=args.postcode,
         condition=args.condition,
         material=args.material,
     )
     if not browser.cdp.is_running():
-        browser.launch()
-        print("launched the dedicated Chrome — log in to Tori if you have not already")
-        return
-    url = asyncio.run(listing.create(item, dry_run=args.dry_run))
+        print("Nothing is listening on the CDP port yet.\n")
+        _cmd_browser(args)
+        return 0
+    try:
+        url = asyncio.run(listing.create(item, dry_run=args.dry_run))
+    except RuntimeError as e:
+        print(f"\nCould not fill the form: {e}")
+        if "login" in str(e).lower() or "create" in str(e).lower():
+            print("\nMost likely you are not logged in to Tori in the automation "
+                  "window.\nOpen it, log in (email one-time code), then re-run. "
+                  "`python -m tori.cli doctor` tells you which.")
+        return 1
     print("\nended at:", url)
     if args.dry_run:
         print("DRY RUN — form filled, not submitted.")
+    else:
+        print("Next steps (delivery / package / publish) are manual for now — "
+              "they are still open in the browser, and the description usually "
+              "needs typing by hand first. See docs/LIMITATIONS.md.")
+
+
+def _cmd_doctor(args):
+    """One-shot environment check for a new user."""
+    import os
+    import shutil
+    import sys
+
+    from . import browser, cdp
+
+    ok = True
+
+    def line(label, good, detail=""):
+        nonlocal ok
+        print(("  ok   " if good else " FAIL  ") + label + ((" — " + detail) if detail else ""))
+        if not good:
+            ok = False
+
+    print("Environment")
+    line("python >= 3.10", sys.version_info >= (3, 10), sys.version.split()[0])
+    try:
+        import websockets
+        line("websockets importable", True, getattr(websockets, "__version__", ""))
+    except Exception as e:
+        line("websockets importable", False, f"{e} — pip install -r requirements.txt")
+
+    print("\nChrome")
+    try:
+        line("chrome executable found", True, browser.chrome_path())
+    except Exception as e:
+        line("chrome executable found", False, str(e))
+
+    prof = browser.profile_dir()
+    print("\nConnection")
+    listening = cdp.is_running()
+    line(f"CDP listening on 127.0.0.1:{cdp.default_port()}", listening,
+         "" if listening else "run: python -m tori.cli browser")
+    line("profile directory", os.path.isdir(prof), prof)
+    if listening:
+        pages = cdp.targets()
+        line("page targets", bool(pages), f"{len(pages)} open")
+        tori = [t for t in pages if "tori.fi" in (t.get("url") or "")]
+        logged = any("/auth" not in (t.get("url") or "") for t in tori)
+        line("a tori.fi tab is open", bool(tori))
+        if tori:
+            line("looks logged in", logged,
+                 "" if logged else "log in to Tori in that window (email one-time code)")
+    print()
+    print("All good — try:" if ok else "Fix the FAIL lines above, then re-run.")
+    if ok:
+        print('  python -m tori.cli search "kenkäteline" --near "Kallio, Helsinki, Finland"')
+        print("  python -m tori.cli create --title ... --price ... --dry-run")
+    return 0 if ok else 1
 
 
 def _cmd_browser(args):
     from . import browser
 
     if browser.cdp.is_running():
-        print("already listening on port", browser.cdp.DEFAULT_PORT)
-        return
+        print(f"already listening on port {browser.cdp.default_port()} — profile {browser.profile_dir()}")
+        return 0
     print("profile:", browser.launch())
-    print("log in to Tori once in that window; the session then persists.")
+    print("\nLog in to Tori once in that window (it emails you a one-time code).")
+    print("The session persists, so this only needs doing once.")
+    print("Then check everything with: python -m tori.cli doctor")
+    return 0
 
 
 def _cmd_targets(args):
@@ -109,6 +183,9 @@ def main(argv=None):
 
     b = sub.add_parser("browser", help="launch the dedicated Chrome")
     b.set_defaults(func=_cmd_browser)
+
+    d = sub.add_parser("doctor", help="check your environment and connection")
+    d.set_defaults(func=_cmd_doctor)
 
     t = sub.add_parser("targets", help="list CDP page targets")
     t.set_defaults(func=_cmd_targets)

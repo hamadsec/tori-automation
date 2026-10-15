@@ -59,6 +59,11 @@ class ToriListing:
         await asyncio.sleep(7)
         url = await self.c.eval("location.href")
         if "/recommerce/create/" not in url:
+            if "login" in (url or "") or "/auth" in (url or ""):
+                raise RuntimeError(
+                    "the browser is not logged in to Tori (redirected to "
+                    f"{url}) — log in in the automation window and re-run"
+                )
             raise RuntimeError(f"unexpected form url: {url}")
         return url
 

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tori-automation"
+version = "0.1.0"
+description = "Scripted Tori.fi automation: distance-ranked second-hand search and listing creation over the Chrome DevTools Protocol."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["tori", "finland", "marketplace", "second-hand", "chrome-devtools-protocol", "automation"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Internet :: WWW/HTTP",
+]
+dependencies = ["websockets>=12.0"]
+
+[project.urls]
+Homepage = "https://github.com/hamadsec/tori-automation"
+Issues = "https://github.com/hamadsec/tori-automation/issues"
+
+[project.scripts]
+tori = "tori.cli:main"
+
+[tool.setuptools]
+packages = ["tori"]

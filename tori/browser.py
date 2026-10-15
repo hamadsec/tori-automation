@@ -45,9 +45,10 @@ def profile_dir() -> str:
                           os.path.join(os.path.expanduser("~"), ".tori-automation", "chrome"))
 
 
-def launch(url: str = "https://www.tori.fi/", port: int = cdp.DEFAULT_PORT,
-           wait: float = 10.0, extra_args=None) -> str:
+def launch(url: str = "https://www.tori.fi/", port: int | None = None,
+           wait: float = 20.0, extra_args=None) -> str:
     """Start the dedicated Chrome with the debug port and open *url*."""
+    port = port or cdp.default_port()
     os.makedirs(profile_dir(), exist_ok=True)
     args = [chrome_path(),
             f"--user-data-dir={profile_dir()}",
@@ -69,10 +70,11 @@ def launch(url: str = "https://www.tori.fi/", port: int = cdp.DEFAULT_PORT,
         time.sleep(0.5)
     raise RuntimeError(
         f"Chrome started but nothing is listening on 127.0.0.1:{port}. "
-        "Check that the profile dir is not the default Chrome profile."
+        f"Check that --user-data-dir={profile_dir()} is not your everyday Chrome "
+        "profile (Chrome silently drops the debug flag on the default profile)."
     )
 
 
-def ensure_running(url: str = "https://www.tori.fi/", port: int = cdp.DEFAULT_PORT) -> None:
+def ensure_running(url: str = "https://www.tori.fi/", port: int | None = None) -> None:
     if not cdp.is_running(port):
         launch(url, port)

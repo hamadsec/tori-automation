@@ -7,21 +7,30 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import urllib.request
 
 DEFAULT_PORT = 9222
 
 
-def endpoint(port: int = DEFAULT_PORT) -> str:
-    return f"http://127.0.0.1:{port}"
+def default_port() -> int:
+    """CDP port — ``$TORI_PORT`` wins, so several profiles can run side by side."""
+    try:
+        return int(os.environ.get("TORI_PORT") or DEFAULT_PORT)
+    except ValueError:
+        return DEFAULT_PORT
 
 
-def _http(path: str, port: int = DEFAULT_PORT):
+def endpoint(port: int | None = None) -> str:
+    return f"http://127.0.0.1:{port or default_port()}"
+
+
+def _http(path: str, port: int | None = None):
     with urllib.request.urlopen(endpoint(port) + path, timeout=10) as r:
         return json.loads(r.read().decode())
 
 
-def is_running(port: int = DEFAULT_PORT) -> bool:
+def is_running(port: int | None = None) -> bool:
     try:
         _http("/json/version", port)
         return True
@@ -29,17 +38,18 @@ def is_running(port: int = DEFAULT_PORT) -> bool:
         return False
 
 
-def targets(port: int = DEFAULT_PORT):
+def targets(port: int | None = None):
     return [t for t in _http("/json/list", port) if t.get("type") == "page"]
 
 
-def page_target(match: str = "tori.fi", port: int = DEFAULT_PORT):
+def page_target(match: str = "tori.fi", port: int | None = None):
     """Return ``(webSocketDebuggerUrl, target)`` for a page, preferring `match`."""
     pages = targets(port)
     if not pages:
         raise RuntimeError(
-            "no page targets — is the dedicated Chrome running with "
-            f"--remote-debugging-port={port}?"
+            "no page targets — is the dedicated Chrome running? Start it with "
+            "`python -m tori.cli browser`, then log in to Tori in that window. "
+            f"(looking on port {port or default_port()})"
         )
     for t in pages:
         if match in (t.get("url") or ""):
