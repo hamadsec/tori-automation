@@ -91,20 +91,38 @@ def _login_state() -> str:
 
     from . import cdp
 
+    try:
+        ws, target = cdp.page_target(port=cdp.default_port())
+    except Exception:
+        return "unknown"
+
+    url = (target.get("url") or "").lower()
+    # An auth-gated page can only be reached with a live session, and the
+    # login host can only mean the opposite. Both beat guessing from markup.
+    if "login.vend.fi" in url or "/auth/login" in url or "/authn/" in url:
+        return "out"
+    if any(p in url for p in ("/my-page", "/my-items", "/messages", "/recommerce/create")):
+        return "in"
+
     probe = r"""
     (() => {
-      const tb = document.querySelector('finn-topbar');
-      const root = tb && tb.shadowRoot ? tb.shadowRoot : document;
-      const hrefs = [...root.querySelectorAll('a')].map(a => a.getAttribute('href') || '');
+      const seen = new Set(); const hrefs = [];
+      (function walk(root, depth) {
+        if (depth > 6) return;
+        let n; try { n = root.querySelectorAll('*'); } catch (e) { return; }
+        for (const el of n) {
+          if (el.shadowRoot && !seen.has(el)) { seen.add(el); walk(el.shadowRoot, depth + 1); }
+          if (el.tagName === 'A') hrefs.push(el.getAttribute('href') || '');
+        }
+      })(document, 0);
       if (hrefs.some(h => h.includes('/my-page'))) return 'in';
       if (hrefs.some(h => h.includes('/auth/login'))) return 'out';
+      const t = (document.body.innerText || '');
+      if (/Kirjaudu/i.test(t)) return 'out';
+      if (/Oma Tori/i.test(t)) return 'in';
       return 'unknown';
     })()
     """
-    try:
-        ws, _ = cdp.page_target(port=cdp.default_port())
-    except Exception:
-        return "unknown"
 
     async def run():
         async with cdp.CDP(ws) as c:
