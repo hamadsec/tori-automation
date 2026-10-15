@@ -1,0 +1,12 @@
+{
+  "_comment": "Example listing. Copy and edit, then: python -m tori.cli create --title ... --price ...",
+  "title": "Nahkainen reppu, ruskea nahka, nyöri- ja solkikiinnitys",
+  "price": "25",
+  "description": "Ruskea nahkainen reppu / olkalaukku.\n\nNahkainen nyörikiristys ja solkikansi, kaksi vetoketjullista sivutaskua, vetoketjullinen etutasku ja avoin takatasku. Messinkiset soljet ja yksityiskohdat. Sisällä oranssi kangasvuori ja sisätasku.\n\nKunto: hyvä, käytetty. Nahka on pehmeä ja kauniisti patinoitunut, ei reikiä eikä repeämiä.\n\nNouto Nouto Helsinki (00100).",
+  "images": ["photo1.jpg", "photo2.jpg"],
+  "postcode": "00100",
+  "category": ["Vaatteet", "Laukut ja lompakot", "Reput"],
+  "condition": "Hyvä",
+  "material": "Nahka",
+  "skip_shipping": true
+}

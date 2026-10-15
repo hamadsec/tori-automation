@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Local Chrome profile created by `tori.cli browser`
+.tori-automation/
+
+# Search dumps and scratch output
+*.json
+!examples/*.json
+
+# Secrets — never commit an env file
+.env
+*.env
