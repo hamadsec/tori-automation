@@ -41,7 +41,13 @@ def _cmd_create(args):
 
     from . import browser, listing
 
-    desc = open(args.desc_file, encoding="utf-8").read() if args.desc_file else (args.desc or "")
+    if args.desc_file:
+        if not os.path.exists(args.desc_file):
+            print(f"description file not found: {args.desc_file}")
+            return 2
+        desc = open(args.desc_file, encoding="utf-8").read()
+    else:
+        desc = args.desc or ""
     images = [os.path.abspath(os.path.expanduser(p)) for p in args.images]
     missing = [p for p in images if not os.path.exists(p)]
     if missing:
@@ -79,20 +85,50 @@ def _cmd_create(args):
               "needs typing by hand first. See docs/LIMITATIONS.md.")
 
 
+def _login_state() -> str:
+    """Probe the open tori.fi tab for a logged-in marker. 'in' | 'out' | 'unknown'."""
+    import asyncio
+
+    from . import cdp
+
+    probe = r"""
+    (() => {
+      const tb = document.querySelector('finn-topbar');
+      const root = tb && tb.shadowRoot ? tb.shadowRoot : document;
+      const hrefs = [...root.querySelectorAll('a')].map(a => a.getAttribute('href') || '');
+      if (hrefs.some(h => h.includes('/my-page'))) return 'in';
+      if (hrefs.some(h => h.includes('/auth/login'))) return 'out';
+      return 'unknown';
+    })()
+    """
+    try:
+        ws, _ = cdp.page_target(port=cdp.default_port())
+    except Exception:
+        return "unknown"
+
+    async def run():
+        async with cdp.CDP(ws) as c:
+            return await c.eval(probe)
+
+    try:
+        return asyncio.run(run()) or "unknown"
+    except Exception:
+        return "unknown"
+
+
 def _cmd_doctor(args):
     """One-shot environment check for a new user."""
     import os
-    import shutil
     import sys
 
     from . import browser, cdp
 
     ok = True
 
-    def line(label, good, detail=""):
+    def line(label, good, detail="", fatal=True):
         nonlocal ok
         print(("  ok   " if good else " FAIL  ") + label + ((" — " + detail) if detail else ""))
-        if not good:
+        if not good and fatal:
             ok = False
 
     print("Environment")
@@ -114,16 +150,25 @@ def _cmd_doctor(args):
     listening = cdp.is_running()
     line(f"CDP listening on 127.0.0.1:{cdp.default_port()}", listening,
          "" if listening else "run: python -m tori.cli browser")
-    line("profile directory", os.path.isdir(prof), prof)
+    line("profile directory", os.path.isdir(prof), prof, fatal=False)
+
     if listening:
         pages = cdp.targets()
         line("page targets", bool(pages), f"{len(pages)} open")
         tori = [t for t in pages if "tori.fi" in (t.get("url") or "")]
-        logged = any("/auth" not in (t.get("url") or "") for t in tori)
         line("a tori.fi tab is open", bool(tori))
         if tori:
-            line("looks logged in", logged,
-                 "" if logged else "log in to Tori in that window (email one-time code)")
+            state = _login_state()
+            if state == "in":
+                line("logged in to Tori", True)
+            elif state == "out":
+                line("logged in to Tori", False,
+                     "log in in that window (email one-time code)")
+            else:
+                line("logged in to Tori", True,
+                     "could not tell — open a tori.fi page in that window and re-run",
+                     fatal=False)
+
     print()
     print("All good — try:" if ok else "Fix the FAIL lines above, then re-run.")
     if ok:
