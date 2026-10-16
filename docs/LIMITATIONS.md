@@ -1,24 +1,37 @@
 # Limitations
 
-## 0. Price — known bug, fix not yet verified
+## 0. Price — BROKEN, no working fix yet
 
-Script-posted ads have been going live at **0 €**. The cause is the same class of
-bug as the description: the price and postcode were filled with the native value
-setter, which writes the DOM but never reaches Tori's app state. Price is not
-validated, so nothing complains — the ad simply publishes at 0 €.
+Script-posted ads go live at **0 €**. Two live ads confirm it: the microphone ad
+(48602826, meant to be 50 €) and the plant ad (48590647, meant to be 5 €). Price
+is not a validated field, so nothing complains — the ad just publishes at 0 €.
 
-`ToriListing.set_number()` now fills price and postcode with `Input.insertText`
-instead, mirroring the description fix.
+**Cause.** Price was filled with the native value setter, which writes the DOM but
+never reaches Tori's app state. Same class of bug as the description.
 
-> **This fix is not yet verified end to end.** Unlike the description — where
-> success is visible because `aria-invalid` clears and *Jatka* unlocks — price
-> has no observable in the form. The only way to confirm it is to publish and
-> read the price back off the live ad. Treat the price path as unproven until
-> someone does that.
+**The obvious fix does not work.** `set_number()` was changed to use
+`Input.insertText`, mirroring the description fix. Verified against the live form
+and it is **not** sufficient for the price input: immediately after
+`insertText`, the price field reads `''` — while the *postcode* input in the same
+routine does keep its value, and the description does too. So `insertText` is
+right for those fields and wrong for this one.
 
-To confirm manually: publish a listing with a distinctive price, then
-`python -m tori.cli search "<title>" --near "<your area>"` and check the price it
-reports.
+**Why this is hard to verify.** Unlike the description — where success is visible
+because `aria-invalid` clears and *Jatka* unlocks — price has **no observable in
+the form**. It is not required, not validated, and nothing unlocks when it is
+set. The only trustworthy oracle is to publish and read the price back off the
+live ad (this is how the bug was found), which is why it went unnoticed.
+
+**What to try next.** The price field is a spinner-style `w-` component; suspects
+are that clearing it re-renders and detaches the node before the write lands
+(re-find the element between clear and write, and lengthen the settle), or that
+it only accepts real key events. Note that *every* other field now works, so
+scope the experiment to this one input.
+
+**Until then: do not trust the price.** Every listing this tool creates needs its
+price checked and, if 0 €, corrected in the Tori UI by hand. Ads can be edited at
+`/recommerce/create/<adId>?editMode=true` (the save button there is *Tallenna*,
+and editing reuses the same delivery → package funnel).
 
 ## 1. The description field — solved, and why it looked impossible
 

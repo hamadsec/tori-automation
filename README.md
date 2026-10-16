@@ -20,13 +20,15 @@ Both are plain Python. The only third-party dependency is `websockets`.
 | Item coordinates, district, condition, reserved flag, shipping flag | ✅ works |
 | Distance ranking with audit trail | ✅ works |
 | Open the create form, pick category chain / condition / material | ✅ works |
-| Title, **description**, price, postcode | ✅ works |
+| Title, **description**, postcode | ✅ works |
+| **Price** | ❌ publishes as 0 € — see [docs/LIMITATIONS.md](docs/LIMITATIONS.md) §0 |
 | **Photo upload** (bypasses the file dialog) | ✅ works |
 | Steps after *Jatka* (delivery, package, **publish**) | ✅ scripted — one command publishes |
-| Deleting an ad | ❌ not scripted — see [docs/LIMITATIONS.md](docs/LIMITATIONS.md) |
+| Deleting an ad | ❌ not scripted — needs a manual tap |
 
-**One command now takes a listing from an empty form to a live ad**, with no
-manual step. Verified end to end against the live site.
+**One command takes a listing from an empty form to a live ad.** But **check the
+price afterwards**: the price field does not accept automated input yet, so ads
+publish at 0 € and must be corrected by hand.
 
 ## Install
 
