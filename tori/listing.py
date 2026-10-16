@@ -2,8 +2,9 @@
 
 Verified end to end: the category chain, condition, material, title, description,
 postcode, photo upload, the delivery → package → publish funnel, and the price —
-the last one via the request patch in ``tori/price.py`` (the price *field* itself
-takes no automated input). Traps worth knowing:
+the last one by filling the field *and* patching the save request in
+``tori/price.py``, then reading the stored price back from Tori's API. Traps
+worth knowing:
 
 * Every uploaded photo adds a caption textarea (``placeholder="Kuvateksti"``).
   The listing description is the textarea that is *not* a caption — select it by
@@ -11,6 +12,9 @@ takes no automated input). Traps worth knowing:
 * The description must be set with ``Input.insertText``. Writing ``value`` via
   the native setter updates the DOM but not the app state, so the field stays
   "required" and *Jatka* never advances.
+* Price is the one field Tori never validates, so it fails *silently* — an ad
+  whose price did not register publishes at 0 €. It is written twice on purpose
+  (field + request patch) and verified afterwards; see docs/LIMITATIONS.md §0.
 """
 from __future__ import annotations
 
@@ -112,13 +116,17 @@ class ToriListing:
                     " && e.getBoundingClientRect().width > 0)")
 
     async def set_number(self, idx: int, value: str, label: str):
-        """Fill a number input (postcode is the one this actually works for).
+        """Fill a number input (price, postcode) with Input.insertText.
 
-        ``insertText`` is right for the postcode but does **not** reach Tori's
-        app state for the price field, which saves as ``"price": {}`` and
-        publishes as 0 € — silently. The price is therefore patched into the save
-        request instead, see ``tori/price.py``. Also not ``__setNative``: that
-        writes the DOM value only.
+        NOT ``__setNative``: that writes the DOM value but never reaches Tori's
+        app state, so a price set that way publishes as **0 €** — silently, with
+        no validation error.
+
+        ``insertText`` is what the postcode needs and it is also what the price
+        is filled with. Whether it registers for the price has gone both ways
+        (it did not, when two live ads went up at 0 €; it did on later runs), so
+        the price is *also* patched into the save request — see
+        ``tori/price.py`` — and read back afterwards.
         """
         r = await self.step(label + ": focus", """
           const ns = %s;
@@ -201,8 +209,10 @@ class ToriListing:
         """Click Jatka on the create form and wait for the delivery step.
 
         With *price* given, the save request Tori fires on that click is
-        intercepted and rewritten to carry the price — the price *field* itself
-        ignores every DOM-level write (see ``tori/price.py``).
+        intercepted and rewritten to carry the price. That is a safety net: the
+        price *field* does get filled with ``Input.insertText``, but it has
+        silently failed to register before (ads published at 0 €), so the price
+        is written twice and read back after publishing (see ``tori/price.py``).
         """
         done = "location.href.includes('/delivery/')"
         if price not in (None, "", 0):
@@ -226,9 +236,69 @@ class ToriListing:
         return await self.c.eval("location.href")
 
     async def ad_id(self) -> str:
-        """The ad/draft id in the current URL."""
-        url = await self.c.eval("location.href")
-        return (url or "").split("/recommerce/")[-1].split("/")[-1].split("?")[0]
+        """The ad/draft id in the current URL.
+
+        The funnel changes URL shape as it goes: the create form and the delivery
+        step carry the id as a path segment (``/recommerce/create/<id>``,
+        ``/recommerce/delivery/<id>``), but ``/choose-products`` carries it as
+        ``?adId=<id>``. Taking "the last path segment" silently returns
+        ``"choose-products"`` there.
+        """
+        url = await self.c.eval("location.href") or ""
+        if "adId=" in url:
+            return url.split("adId=")[1].split("&")[0].split("#")[0]
+        for marker in ("/recommerce/create/", "/recommerce/delivery/"):
+            if marker in url:
+                return url.split(marker)[1].split("/")[0].split("?")[0]
+        # Anything else (/my-items, the receipt page): only trust a numeric tail.
+        tail = url.split("?")[0].rstrip("/").split("/")[-1]
+        return tail if tail.isdigit() else ""
+
+    async def read_price(self, ad_id: str | None = None):
+        """The *stored* price of an ad, straight from Tori's own API.
+
+        Server truth, unlike the form field (which can display a value the
+        stored ad does not have) or the seller card (a rendering of the same
+        API). Returns the integer amount, or ``None`` when Tori reports no
+        price — which is exactly what a silently price-less ad looks like.
+        """
+        ad = str(ad_id or await self.ad_id())
+        r = await self.c.eval(
+            "(async () => {"
+            " const r = await fetch("
+            f"'https://www.tori.fi/recommerce/create/api/item/{ad}',"
+            " {credentials: 'include', headers: {'Accept': 'application/json'}});"
+            " if (!r.ok) return {status: r.status};"
+            " const j = await r.json(); const d = j.data || j;"
+            " return {status: r.status, price: d.price || null,"
+            "         title: d.title || null};"
+            "})()", await_promise=True)
+        if not isinstance(r, dict):
+            return None
+        price = r.get("price")
+        if isinstance(price, dict):
+            return price.get("price_amount")
+        return None
+
+    async def verify_price(self, price, ad_id: str | None = None) -> dict:
+        """Read the price back and shout if the stored ad disagrees.
+
+        Price is the one field Tori never validates: an ad whose price did not
+        register publishes at 0 € with no error shown anywhere. So this is the
+        oracle — read it back instead of trusting the form's own value.
+        """
+        ad = str(ad_id or await self.ad_id())
+        want = int(price)
+        got = await self.read_price(ad)
+        ok = got == want
+        if self.verbose:
+            if ok:
+                print(f"  ok  price verified: ad {ad} stores {got} €")
+            else:
+                print(f" FAIL price of ad {ad} is {got!r}, wanted {want} — correct "
+                      f"it with: python -m tori.cli fix-price --ad {ad} "
+                      f"--price {want}")
+        return {"ad": ad, "want": want, "got": got, "ok": ok}
 
     # --- clicking Tori's custom controls -------------------------------------
     #
@@ -328,7 +398,12 @@ class ToriListing:
         """)
 
     async def finish(self, package: str = "Basic", price=None) -> str:
-        """Delivery → package → publish. Call after `fill`."""
+        """Delivery → package → publish. Call after `fill`.
+
+        On the create form the ad id is in the path, so grab it before stepping
+        through the funnel — by the package step it is only in the query string.
+        """
+        ad = await self.ad_id()
         # Create form → delivery step. (The create→delivery Jatka only advances
         # once every required field has registered.)
         await self.continue_forward(price)
@@ -339,30 +414,24 @@ class ToriListing:
         await self.choose_package(package)
         await asyncio.sleep(2)
         # The submit button reads "Siirry maksamaan" until Basic is selected,
-        # then becomes "Julkaise ilmoitus". The publish request carries the whole
-        # ad, so it is patched too when a price is known.
+        # then becomes "Julkaise ilmoitus".
+        #
+        # There is no request to patch here: publishing is `POST
+        # /recommerce/choose-products/api/ordernow?adId=<id>` with an empty
+        # body — it publishes whatever the *stored* ad already says. So the
+        # price has to be right before this point, and the only useful thing to
+        # do afterwards is read it back.
         done = ("location.href.includes('/ad-receipt') "
                 "|| location.href.includes('/my-items')")
         labels = ("Julkaise ilmoitus", "Siirry maksamaan")
-        if price not in (None, "", 0):
-            from . import price as price_patch
-
-            ad = await self.ad_id()
-            for label in labels:
-                state = await price_patch.patch_with(
-                    self.c, ad, price,
-                    click_step=lambda mode, lbl=label: self._click_once(lbl, mode))
-                if self.verbose:
-                    print(("  ok  " if state["patched"] else "  --  ") +
-                          f"publish: {label} (price patched into "
-                          f"{len(state['patched'])} request(s))")
-                if await self.c.eval(done):
-                    return await self.c.eval("location.href")
         for label in labels:
             if await self.c.eval(done):
                 break
             await self.click_until(label, done, label=f"publish ({label})")
-        return await self.c.eval("location.href")
+        url = await self.c.eval("location.href")
+        if price not in (None, "", 0) and await self.c.eval(done):
+            await self.verify_price(price, ad)
+        return url
 
 
 def _q(s) -> str:

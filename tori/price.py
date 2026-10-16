@@ -1,27 +1,35 @@
 """Set an ad's price by patching the request Tori itself sends.
 
-Why this exists: the price field is the one control in the create form that
-**refuses every DOM-level write**. Writing `value` (directly or through the
-native prototype setter), `Input.insertText`, and per-character
-`Input.dispatchKeyEvent` all fail to reach Tori's app state, so the ad is saved
-with `"price": {}` and publishes at **0 €** — silently, because price is neither
-required nor validated in the form.
+Why this exists: price is the one field in the create form that Tori never
+validates, so a price that does not register fails **silently** — the ad is
+saved with `"price": {}` and publishes at **0 €**. That is not hypothetical: the
+microphone ad 48602826 (meant to be 50 €) and the plant ad 48590647 (meant to be
+5 €) both went live at 0 € that way.
 
-What does work is intercepting the save request. Clicking *Tallenna* (edit form)
-or *Jatka* (create form) makes the app `PUT /recommerce/create/api/item/<ad>`
-with a JSON body. With the CDP Fetch domain we pause that request, rewrite
+The price *field* is filled with `Input.insertText` and that has gone both ways
+— it failed to register when those two ads went up, and it did register on later
+runs (two drafts filled but never submitted stored 17 € and 23 € with no patch
+installed at all). So the field is *unreliable* rather than broken, and this
+module is the belt to its braces: the price is written twice.
 
-    data.price = {"price_amount": <n>}
+What this does is intercept the save request. Clicking *Tallenna* (edit form) or
+*Jatka* (create form) makes the app `PUT /recommerce/create/api/item/<ad>` with
+a JSON body. With the CDP Fetch domain that request is paused, `data.price` is
+rewritten to `{"price_amount": <n>}` and it is continued — so the request keeps
+the browser's own `E-Tag`, cookies and headers, and the E-Tag stays valid.
+Verified live: ad 48602826 went from 0 € to 50 € this way, visible both on the
+seller's /my-items card and in public search.
 
-and continue it — so the request keeps the browser's own `E-Tag`, cookies and
-headers. Verified live: ad 48602826 went from 0 € to 50 € this way, visible both
-on the seller's /my-items card and in public search.
+Note what is *not* here: the publish click. It is `POST
+/recommerce/choose-products/api/ordernow?adId=<id>` with an empty body — it
+publishes whatever the stored ad already says, so there is no request body to
+patch at that point and the price must be right beforehand.
 
-Note the background-window trap: in the automation Chrome (which never gets OS
-focus) real key events are not delivered to the page at all — only programmatic
-clicks and `insertText` work, which is why the price needed the request-level fix
-rather than a better typing trick.
+Note also the background-window trap: in the automation Chrome (which never gets
+OS focus) real key events are not delivered to the page at all, which is why the
+price is fixed at the request level rather than with a better typing trick.
 """
+
 from __future__ import annotations
 
 import base64

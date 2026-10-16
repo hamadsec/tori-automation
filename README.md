@@ -21,15 +21,16 @@ Both are plain Python. The only third-party dependency is `websockets`.
 | Distance ranking with audit trail | ✅ works |
 | Open the create form, pick category chain / condition / material | ✅ works |
 | Title, **description**, postcode | ✅ works |
-| **Price** | ✅ works — patched into Tori's own save request (`tori/price.py`); the input field itself takes no automated input. Check it back after publishing |
+| **Price** | ✅ works and is verified after publishing — written into both the form field and Tori's own save request (`tori/price.py`), then read back from Tori's API. Price alone fails *silently* (an ad with no price goes live at 0 €), so never trust the form |
 | **Photo upload** (bypasses the file dialog) | ✅ works |
 | Steps after *Jatka* (delivery, package, **publish**) | ✅ scripted — one command publishes |
 | Deleting an ad | ❌ not scripted — needs a manual tap |
 
-**One command takes a listing from an empty form to a live ad.** Prices are set
-by rewriting the save request Tori sends (see
-[docs/LIMITATIONS.md](docs/LIMITATIONS.md) §0), and the price of an ad that
-already exists can be corrected with:
+**One command takes a listing from an empty form to a live ad.** The price is
+written twice — into the field and into the save request Tori sends (see
+[docs/LIMITATIONS.md](docs/LIMITATIONS.md) §0) — and then read back from Tori's
+API, because a price that did not register publishes as 0 € with no error at all.
+The price of an ad that already exists can be corrected with:
 
 ```bash
 python -m tori.cli fix-price --ad <adId> --price 50
@@ -131,9 +132,17 @@ so you can look at the result**.
 
 **Drop `--dry-run` and this command publishes.** It continues through the
 delivery step (pickup only), picks the free **Basic** package, and publishes —
-no manual clicks. On success it prints `PUBLISHED — ad <id>`, and the ad shows
-as *Under review* until Tori approves it. Then confirm it independently at
-<https://www.tori.fi/my-items>: a changed URL alone is not proof.
+no manual clicks. On success it prints `PUBLISHED — ad <id>` (the ad shows as
+*Under review* until Tori approves it) followed by a price read-back straight
+from Tori's API:
+
+```
+  ok  price verified: ad 48604695 stores 15 €
+```
+
+If that line says `FAIL` instead, the printed `fix-price` command repairs it. A
+changed URL is not proof of anything on its own — confirm the ad independently at
+<https://www.tori.fi/my-items>.
 
 Always pass `--category`. Without it every ad is filed under the default bag
 category. The path is the three visible Finnish labels, comma-separated
@@ -198,6 +207,11 @@ Two things about the funnel are easy to get wrong, and both fail *silently*:
   required forever.
 - The **pickup-only delivery radio is not pre-selected**. With no radio checked,
   *Jatka* refuses to advance and shows nothing.
+
+Price is the third silent one: it is neither required nor validated, so an ad
+whose price did not register simply publishes at 0 €. The code writes it into the
+field *and* Tori's save request, then reads it back from the API after publishing
+— see [docs/LIMITATIONS.md](docs/LIMITATIONS.md) §0.
 
 More detail, including every dead end worth not repeating, is in
 [docs/FINDINGS.md](docs/FINDINGS.md) and [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
