@@ -20,13 +20,13 @@ Both are plain Python. The only third-party dependency is `websockets`.
 | Item coordinates, district, condition, reserved flag, shipping flag | ✅ works |
 | Distance ranking with audit trail | ✅ works |
 | Open the create form, pick category chain / condition / material | ✅ works |
-| Title, price, postcode | ✅ works |
+| Title, **description**, price, postcode | ✅ works |
 | **Photo upload** (bypasses the file dialog) | ✅ works |
-| **Description field** | ❌ automated input does not register — see [docs/LIMITATIONS.md](docs/LIMITATIONS.md) |
-| Steps after *Jatka* (delivery, package, publish) | ⚠️ not scripted yet; do them by hand |
+| Steps after *Jatka* (delivery, package, **publish**) | ✅ scripted — one command publishes |
+| Deleting an ad | ❌ not scripted — see [docs/LIMITATIONS.md](docs/LIMITATIONS.md) |
 
-The description is the one real wall. Everything else on the create form is
-scripted and verified.
+**One command now takes a listing from an empty form to a live ad**, with no
+manual step. Verified end to end against the live site.
 
 ## Install
 
@@ -113,12 +113,27 @@ python -m tori.cli create \
     --price 25 \
     --desc-file description.txt \
     --images photo1.jpg photo2.jpg \
+    --category "Vaatteet, kosmetiikka ja asusteet,Laukut ja lompakot,Reput" \
     --postcode 00100 --condition "Hyvä" --material "Nahka" \
     --dry-run
 ```
 
 `--dry-run` fills the form and stops before submitting — **use it the first time
-so you can look at the result**. Drop it to continue to the delivery step.
+so you can look at the result**.
+
+**Drop `--dry-run` and this command publishes.** It continues through the
+delivery step (pickup only), picks the free **Basic** package, and publishes —
+no manual clicks. On success it prints `PUBLISHED — ad <id>`, and the ad shows
+as *Under review* until Tori approves it. Then confirm it independently at
+<https://www.tori.fi/my-items>: a changed URL alone is not proof.
+
+Always pass `--category`. Without it every ad is filed under the default bag
+category. The path is the three visible Finnish labels, comma-separated
+(Osasto, Alaluokka, Tuoteryhmä) — e.g. for a houseplant:
+
+```
+--category "Piha ja remontointi,Piha ja puutarha,Kasvit ja istutus"
+```
 
 Write the title and description in Finnish; the audience is Finnish-language.
 
@@ -167,14 +182,23 @@ option text instead. The photo input is a real `input[type=file]`, uploaded with
 `DOM.setFileInputFiles` and an `objectId` — which is why there is no file dialog
 in this tool at all.
 
+Two things about the funnel are easy to get wrong, and both fail *silently*:
+
+- The **description** is only accepted via `Input.insertText` on the right
+  textarea. Every uploaded photo adds its own caption box, so "the first
+  textarea" is a photo caption — put your text there and the description stays
+  required forever.
+- The **pickup-only delivery radio is not pre-selected**. With no radio checked,
+  *Jatka* refuses to advance and shows nothing.
+
 More detail, including every dead end worth not repeating, is in
-[docs/FINDINGS.md](docs/FINDINGS.md).
+[docs/FINDINGS.md](docs/FINDINGS.md) and [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 
 ## Limitations
 
-- The description field rejects automated input. It is the one field you have to
-  type yourself. See [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
-- Posting is not scripted past the *Jatka* button yet.
+- **Deleting an ad is not scripted.** The confirmation dialog's button ignores
+  programmatic, shadow-inner and trusted coordinate clicks — delete from the
+  Tori UI by hand.
 - Selectors are text- and structure-based, not id-based, which is more durable —
   but a redesign of the create page will still break `tori/page.py`.
 - Nominatim (address → coordinates) asks for ≤1 request/second. Don't hammer it.
@@ -186,10 +210,9 @@ More detail, including every dead end worth not repeating, is in
 
 The most useful contributions, roughly in order:
 
-1. Cracking the description field (see docs/LIMITATIONS.md for what has been
-   ruled out).
-2. Scripting the delivery → package → publish steps.
-3. A responder/listener for seller messages.
+1. Scripting ad deletion (see docs/LIMITATIONS.md for what has been ruled out).
+2. A responder/listener for seller messages.
+3. Keeping up with Tori's form changes.
 
 Please keep the "no Playwright/Selenium" property if you can — raw CDP keeps the
 dependency list to one package.

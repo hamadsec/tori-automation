@@ -1,52 +1,65 @@
 # Limitations
 
-## 1. The description field rejects automated input
+## 1. The description field — solved, and why it looked impossible
 
-This is the one hard wall in the project.
+**It works now.** Set it with `Input.insertText` on the correct textarea. Two
+separate mistakes made this look like a hard wall:
 
-**Symptom.** The description text ends up in the DOM and is visible on screen,
-but Tori's form validation still reports `Pakollinen kenttä` ("required field"),
-and the *Jatka* button refuses to advance.
+1. **Wrong element.** Every uploaded photo adds its own caption textarea
+   (`placeholder="Kuvateksti"`). `__find(e => e.tagName === 'TEXTAREA')` returns
+   the *first caption box*, so the text went into a photo caption. The listing's
+   own description is the textarea that is **not** a caption — select it that
+   way. This mistake alone accounts for most of the "nothing works" evidence
+   that used to be listed here.
+2. **Wrong write method.** Writing `value` — directly or through the native
+   prototype setter — updates the DOM but not Tori's app state, so the field
+   still counts as empty. `Input.insertText` goes through the real input
+   pipeline and does register.
 
-**What has been ruled out** (all tried against the live form):
+Symptom when it goes wrong: the text is visible in the field, validation still
+shows `Tarkista Kuvaus ennen kuin voit jatkaa.` ("check the description before
+you can continue") and *Jatka* refuses to advance.
+
+| Method (against the **correct** textarea) | Result |
+|---|---|
+| `Input.insertText` | ✅ registers — this is what the code uses |
+| Native prototype value setter + `input`/`change` events | ❌ DOM only, app state unchanged |
+| `el.value = x` | ❌ DOM only |
+| Per-character `Input.dispatchKeyEvent` | ❌ does not register, and the text spills into whatever else has focus |
+
+**Earlier conclusion, now known to be wrong:** that only real OS-level keyboard
+input (the `computer_use` `type` action) would do, and the flow had to be a
+script-plus-hand-typing hybrid. That was an artefact of typing into a caption
+box. No GUI input is needed anywhere in this tool.
+
+## 2. The title field was never the problem
+
+The title (`input[name=title]`) accepted synthetic input all along. That ruled
+out a blanket "this app ignores synthetic events" explanation and pointed at the
+description widget specifically — which turned out to be half right: the widget
+*writes* only accept `insertText`, and the rest of the mystery was that the code
+was addressing a photo caption instead.
+
+## 3. Deleting an ad is not scripted
+
+Everything else in the funnel is. What remains manual is *deleting*:
+
+The quick-action menu (*Valikko ilmoituksen pikavalintoihin*) → *Poista* opens a
+confirmation dialog whose **Poista** button did not respond to any of the three
+click methods that work elsewhere:
 
 | Method | Result |
 |---|---|
-| `el.value = x` | value set, app state unchanged |
-| Prototype value setter + `input`/`change` events (`bubbles` + `composed`) | same |
-| `Input.insertText` (CDP, browser-level) | same |
-| Per-character `Input.dispatchKeyEvent` (keyDown/char/keyUp) | same — and text spills into whatever else has focus |
-| Trusted `Input.dispatchMouseEvent` click on *Jatka* | nothing |
-| `form.requestSubmit()` / `form.submit()` | native submit fires, validation still blocks |
+| Host `.click()` on the `w-button` | nothing |
+| Shadow-inner `button.click()` | no shadow button found |
+| Trusted `Input.dispatchMouseEvent` at its centre | nothing |
 
-**What does work.** Real OS-level keyboard input (the Hermes `computer_use`
-`type` action) — that is how the manual run succeeded. So the practical setup is
-a hybrid: script the dropdowns, price, postcode and photos, and type the two
-free-text fields by hand or with a desktop-automation tool.
+So ad deletion needs a human tap in the Tori UI. Do not promise automated
+cleanup.
 
-**Hypothesis.** The textarea is wrapped by a component that keeps its own model
-and only syncs on its own event; the events above are visible in the DOM but
-never reach that model. Worth investigating: whether the real binding sits on an
-inner element of a `w-textarea`-style custom element, or on a `keyup`/`blur`
-handler, or whether the value is mirrored into a hidden input at submit time.
-
-**Watch out if you type by keyboard.** Key events go to whatever has focus. A
-photo's *caption* box will happily swallow a paragraph intended for the
-description — check the captions afterwards.
-
-## 2. The title field is fine, so the problem is specific
-
-The title (`input[name=title]`) accepts the same synthetic input with no
-complaint. That rules out a blanket "this app ignores synthetic events"
-explanation and points at the description widget specifically.
-
-## 3. Publishing after *Jatka* is not scripted
-
-The delivery page (ToriDiili package size, or "I can't send the goods"), the
-package choice (Basic free / Plus / Premium) and the payment step are manual for
-now. They are simple radio/button screens; scripting them is a small job for
-whoever picks it up. Note that a paid package spends real money — never select
-one implicitly.
+Note also that a paid package (Plus / Premium) spends real money — the code
+always selects **Basic** (free) and never selects a paid one implicitly. Keep it
+that way.
 
 ## 4. Selector durability
 

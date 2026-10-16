@@ -40,9 +40,25 @@ wasted time, so the next person does not repeat them.
 - Bypassing the AJAX/React-only layer is not possible: a native `form.submit()`
   fires but the app's own validation still blocks, because validation reads the
   app's state rather than the DOM.
-- **`Jatka` is `<w-button type="submit">`**, not a button. `.click()` on the host
-  does nothing, and a trusted CDP mouse click at its coordinates does nothing
-  either while validation is failing.
+- **`Jatka` is `<w-button type="submit">`**, not a button. Which click works
+  varies by control and had to be found empirically: the reliable method for
+  *Jatka* and *Julkaise ilmoitus* is a plain `.click()` on the host, while the
+  delivery `w-radio` also answers only to that. Trusted coordinate clicks work
+  for some controls and do nothing for others — so the code tries
+  coords → shadow-inner → host and stops as soon as the URL actually moves.
+  A click that "does nothing" while validation is failing is a validation
+  problem, not a click problem.
+- **Each uploaded photo adds its own caption textarea** (`placeholder="Kuvateksti"`).
+  `__find(e => e.tagName === 'TEXTAREA')` therefore returns a *caption*, not the
+  listing description — the description is the textarea that is **not** a
+  caption. Writing into the caption leaves the description "required" and *Jatka*
+  refuses to advance, with the misleading message `Tarkista Kuvaus`.
+- **The description only accepts `Input.insertText`.** The native value setter
+  updates the DOM but not the app's state (same class of problem as the
+  `form.submit()` bullet above). Re-focus, clear, then `insertText`.
+- **The pickup-only delivery radio is not pre-selected.** On a fresh funnel no
+  radio is checked, and *Jatka* refuses to advance showing nothing at all.
+  Select it explicitly by clicking the `w-radio` host.
 - The photo input is a plain `input[type=file][multiple]`.
   `DOM.setFileInputFiles` accepts an **objectId** from `Runtime.evaluate`, which
   sidesteps the shadow-DOM problem entirely — `DOM.querySelector` cannot pierce
