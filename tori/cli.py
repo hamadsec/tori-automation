@@ -222,6 +222,55 @@ def _cmd_targets(args):
         print(t.get("title", "")[:60], "|", (t.get("url") or "")[:80])
 
 
+async def _read_price(c) -> str:
+    from . import page
+
+    return await c.eval(page.wrap("""
+      const nums = __all(e => e.tagName === 'INPUT' && e.type === 'number'
+                          && e.getBoundingClientRect().width > 0);
+      return nums.length ? nums[0].value : null;
+    """))
+
+
+def _cmd_fix_price(args):
+    """Set the price on an existing ad by patching Tori's own save request."""
+    import asyncio
+
+    from . import cdp, listing, price
+
+    ad = str(args.ad)
+    if not cdp.is_running():
+        print("Nothing is listening on the CDP port — run: python -m tori.cli browser")
+        return 1
+
+    async def run():
+        ws, _ = cdp.page_target(port=cdp.default_port())
+        async with cdp.CDP(ws) as c:
+            await c.send("Runtime.enable")
+            await c.send("DOM.enable")
+            t = listing.ToriListing(c)
+            await c.navigate(f"https://www.tori.fi/recommerce/create/{ad}?editMode=true", wait=10)
+            print("before:", await _read_price(c))
+            state = await price.patch_with(
+                c, ad, args.price,
+                click_step=lambda mode: t._click_once("Tallenna", mode))
+            print("patched requests:", state["patched"])
+            if not state["patched"]:
+                print("no save request was intercepted — the ad was not changed")
+                return 1
+            await asyncio.sleep(2)
+            # the edit funnel finishes with another Tallenna on the delivery step
+            await t.click_until("Tallenna", "location.href.indexOf('/delivery/') < 0",
+                                label="save delivery")
+            await asyncio.sleep(3)
+            await c.navigate(f"https://www.tori.fi/recommerce/create/{ad}?editMode=true", wait=10)
+            print("after:", await _read_price(c))
+        return 0
+
+    return asyncio.run(run())
+
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="tori", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -261,6 +310,11 @@ def main(argv=None):
 
     t = sub.add_parser("targets", help="list CDP page targets")
     t.set_defaults(func=_cmd_targets)
+
+    f = sub.add_parser("fix-price", help="set the price on an existing ad")
+    f.add_argument("--ad", required=True, help="ad id")
+    f.add_argument("--price", required=True, type=int, help="price in €")
+    f.set_defaults(func=_cmd_fix_price)
 
     args = ap.parse_args(argv)
     return args.func(args)

@@ -1,37 +1,55 @@
 # Limitations
 
-## 0. Price — BROKEN, no working fix yet
+## 0. Price — solved by patching the save request (§0)
 
-Script-posted ads go live at **0 €**. Two live ads confirm it: the microphone ad
-(48602826, meant to be 50 €) and the plant ad (48590647, meant to be 5 €). Price
-is not a validated field, so nothing complains — the ad just publishes at 0 €.
+Script-posted ads used to go live at **0 €** (two live ads confirmed it: the
+microphone ad 48602826, meant to be 50 €, and the plant ad 48590647, meant to be
+5 €). Price is not a validated field, so nothing complains.
 
-**Cause.** Price was filled with the native value setter, which writes the DOM but
-never reaches Tori's app state. Same class of bug as the description.
+**Cause.** The price *field* is the one control in the form that refuses every
+DOM-level write. Writing `value` (directly or through the native prototype
+setter), `Input.insertText`, and per-character `Input.dispatchKeyEvent` all fail
+to reach Tori's app state — the ad saves as `"price": {}`.
 
-**The obvious fix does not work.** `set_number()` was changed to use
-`Input.insertText`, mirroring the description fix. Verified against the live form
-and it is **not** sufficient for the price input: immediately after
-`insertText`, the price field reads `''` — while the *postcode* input in the same
-routine does keep its value, and the description does too. So `insertText` is
-right for those fields and wrong for this one.
+Keyboard input cannot even reach the page here: in the automation Chrome, which
+never takes OS focus, real key events are dropped entirely (coordinate clicks and
+`insertText` still work). So "type it like a human" was never available.
 
-**Why this is hard to verify.** Unlike the description — where success is visible
-because `aria-invalid` clears and *Jatka* unlocks — price has **no observable in
-the form**. It is not required, not validated, and nothing unlocks when it is
-set. The only trustworthy oracle is to publish and read the price back off the
-live ad (this is how the bug was found), which is why it went unnoticed.
+**The fix: patch the request Tori itself sends.** Clicking *Jatka* (create form)
+or *Tallenna* (edit form) makes the app `PUT
+/recommerce/create/api/item/<ad>` with the whole ad as JSON. With the CDP Fetch
+domain we pause that request, rewrite `data.price = {"price_amount": <n>}`, and
+continue it — so the request keeps the browser's own `E-Tag`, cookies and
+headers, and the E-Tag stays valid. Implementation: `tori/price.py`
+(`PricePatcher` / `patch_with`), wired into `ToriListing.continue_forward()` and
+`finish()` so the one-command create sets the price, plus a standalone command
+for ads that are already live:
 
-**What to try next.** The price field is a spinner-style `w-` component; suspects
-are that clearing it re-renders and detaches the node before the write lands
-(re-find the element between clear and write, and lengthen the settle), or that
-it only accepts real key events. Note that *every* other field now works, so
-scope the experiment to this one input.
+```bash
+python -m tori.cli fix-price --ad 48602826 --price 50
+```
 
-**Until then: do not trust the price.** Every listing this tool creates needs its
-price checked and, if 0 €, corrected in the Tori UI by hand. Ads can be edited at
-`/recommerce/create/<adId>?editMode=true` (the save button there is *Tallenna*,
-and editing reuses the same delivery → package funnel).
+**Verified.** Ad 48602826 was published at 0 € and corrected to 50 € with
+`fix-price` (before → 49 → 50, read back from `?editMode=true` each time, then
+confirmed on the seller's `/my-items` card and in public search). The create-path
+interception was verified on a throwaway draft: the `PUT` fired by *Jatka* was
+rewritten and the stored draft read back at the intended price.
+
+**One step still to verify.** The wiring inside `ToriListing.finish()` (patching
+the publish request as well as Jatka) has not been exercised by a real
+end-to-end create yet. A probe that drove *Jatka* on an already-saved draft
+patched both `PUT`s but the draft kept its old price, so treat "the one command
+now sets the price" as promising-but-unconfirmed until a real listing is checked:
+publish, then read the price back, and run `fix-price` if it did not land.
+
+
+**Watch out.** The old workaround — correcting the price by hand in the Tori UI
+— is no longer needed, but keep the oracle: after any scripted listing, read the
+price back (the edit form at `/recommerce/create/<adId>?editMode=true` shows the
+stored value; the public search row is a good second check). The price field
+itself is still useless as a signal: it is neither required nor validated, and
+nothing in the form unlocks when it is set.
+
 
 ## 1. The description field — solved, and why it looked impossible
 

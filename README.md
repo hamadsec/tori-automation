@@ -21,14 +21,20 @@ Both are plain Python. The only third-party dependency is `websockets`.
 | Distance ranking with audit trail | ✅ works |
 | Open the create form, pick category chain / condition / material | ✅ works |
 | Title, **description**, postcode | ✅ works |
-| **Price** | ❌ publishes as 0 € — see [docs/LIMITATIONS.md](docs/LIMITATIONS.md) §0 |
+| **Price** | ✅ works — patched into Tori's own save request (`tori/price.py`); the input field itself takes no automated input. Check it back after publishing |
 | **Photo upload** (bypasses the file dialog) | ✅ works |
 | Steps after *Jatka* (delivery, package, **publish**) | ✅ scripted — one command publishes |
 | Deleting an ad | ❌ not scripted — needs a manual tap |
 
-**One command takes a listing from an empty form to a live ad.** But **check the
-price afterwards**: the price field does not accept automated input yet, so ads
-publish at 0 € and must be corrected by hand.
+**One command takes a listing from an empty form to a live ad.** Prices are set
+by rewriting the save request Tori sends (see
+[docs/LIMITATIONS.md](docs/LIMITATIONS.md) §0), and the price of an ad that
+already exists can be corrected with:
+
+```bash
+python -m tori.cli fix-price --ad <adId> --price 50
+```
+
 
 ## Install
 

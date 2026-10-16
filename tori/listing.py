@@ -1,8 +1,9 @@
 """Create a Tori.fi listing over CDP.
 
 Verified end to end: the category chain, condition, material, title, description,
-price, postcode, photo upload, and the delivery → package → publish funnel all
-run without any GUI input. Two traps worth knowing:
+postcode, photo upload, the delivery → package → publish funnel, and the price —
+the last one via the request patch in ``tori/price.py`` (the price *field* itself
+takes no automated input). Traps worth knowing:
 
 * Every uploaded photo adds a caption textarea (``placeholder="Kuvateksti"``).
   The listing description is the textarea that is *not* a caption — select it by
@@ -111,11 +112,13 @@ class ToriListing:
                     " && e.getBoundingClientRect().width > 0)")
 
     async def set_number(self, idx: int, value: str, label: str):
-        """Fill a number input (price, postcode) with Input.insertText.
+        """Fill a number input (postcode is the one this actually works for).
 
-        NOT __setNative: that writes the DOM value but never reaches Tori's app
-        state, so a price set that way publishes as **0 €** — silently, with no
-        validation error. This was live: every script-posted ad went up at 0 €.
+        ``insertText`` is right for the postcode but does **not** reach Tori's
+        app state for the price field, which saves as ``"price": {}`` and
+        publishes as 0 € — silently. The price is therefore patched into the save
+        request instead, see ``tori/price.py``. Also not ``__setNative``: that
+        writes the DOM value only.
         """
         r = await self.step(label + ": focus", """
           const ns = %s;
@@ -194,15 +197,38 @@ class ToriListing:
           return {ok: true, images_on_page: __all(e => e.tagName === 'IMG').length};
         """)
 
-    async def continue_forward(self):
-        """Click Jatka on the create form and wait for the delivery step."""
-        ok = await self.click_until("Jatka", "location.href.includes('/delivery/')",
-                                    label="create → delivery")
+    async def continue_forward(self, price=None):
+        """Click Jatka on the create form and wait for the delivery step.
+
+        With *price* given, the save request Tori fires on that click is
+        intercepted and rewritten to carry the price — the price *field* itself
+        ignores every DOM-level write (see ``tori/price.py``).
+        """
+        done = "location.href.includes('/delivery/')"
+        if price not in (None, "", 0):
+            from . import price as price_patch
+
+            ad = await self.ad_id()
+            state = await price_patch.patch_with(
+                self.c, ad, price,
+                click_step=lambda mode: self._click_once("Jatka", mode))
+            if self.verbose:
+                print(("  ok  " if state["patched"] else "  --  ") +
+                      f"price {price} patched into save request ({state['patched']})")
+            await asyncio.sleep(3)
+            if await self.c.eval(done):
+                return await self.c.eval("location.href")
+        ok = await self.click_until("Jatka", done, label="create → delivery")
         if not ok:
             raise RuntimeError(
                 "Jatka did not advance — the form is incomplete (most likely a "
                 "required dropdown never registered)")
         return await self.c.eval("location.href")
+
+    async def ad_id(self) -> str:
+        """The ad/draft id in the current URL."""
+        url = await self.c.eval("location.href")
+        return (url or "").split("/recommerce/")[-1].split("/")[-1].split("?")[0]
 
     # --- clicking Tori's custom controls -------------------------------------
     #
@@ -301,11 +327,11 @@ class ToriListing:
           return {ok: true, clicked: true};
         """)
 
-    async def finish(self, package: str = "Basic") -> str:
+    async def finish(self, package: str = "Basic", price=None) -> str:
         """Delivery → package → publish. Call after `fill`."""
         # Create form → delivery step. (The create→delivery Jatka only advances
         # once every required field has registered.)
-        await self.continue_forward()
+        await self.continue_forward(price)
         await self.choose_pickup_only()
         await asyncio.sleep(2)
         await self.click_until("Jatka", "location.href.includes('/choose-products')",
@@ -313,16 +339,29 @@ class ToriListing:
         await self.choose_package(package)
         await asyncio.sleep(2)
         # The submit button reads "Siirry maksamaan" until Basic is selected,
-        # then becomes "Julkaise ilmoitus".
-        ok = await self.click_until(
-            "Julkaise ilmoitus",
-            "location.href.includes('/ad-receipt') || location.href.includes('/my-items')",
-            label="publish")
-        if not ok:
-            ok = await self.click_until(
-                "Siirry maksamaan",
-                "location.href.includes('/ad-receipt') || location.href.includes('/my-items')",
-                label="publish (alt label)")
+        # then becomes "Julkaise ilmoitus". The publish request carries the whole
+        # ad, so it is patched too when a price is known.
+        done = ("location.href.includes('/ad-receipt') "
+                "|| location.href.includes('/my-items')")
+        labels = ("Julkaise ilmoitus", "Siirry maksamaan")
+        if price not in (None, "", 0):
+            from . import price as price_patch
+
+            ad = await self.ad_id()
+            for label in labels:
+                state = await price_patch.patch_with(
+                    self.c, ad, price,
+                    click_step=lambda mode, lbl=label: self._click_once(lbl, mode))
+                if self.verbose:
+                    print(("  ok  " if state["patched"] else "  --  ") +
+                          f"publish: {label} (price patched into "
+                          f"{len(state['patched'])} request(s))")
+                if await self.c.eval(done):
+                    return await self.c.eval("location.href")
+        for label in labels:
+            if await self.c.eval(done):
+                break
+            await self.click_until(label, done, label=f"publish ({label})")
         return await self.c.eval("location.href")
 
 
@@ -341,4 +380,4 @@ async def create(listing: Listing, port: int = cdp.DEFAULT_PORT, dry_run: bool =
         await t.fill(listing)
         if dry_run:
             return url
-        return await t.finish()
+        return await t.finish(price=listing.price)
