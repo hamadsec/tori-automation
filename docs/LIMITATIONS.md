@@ -1,5 +1,25 @@
 # Limitations
 
+## 0. Price — known bug, fix not yet verified
+
+Script-posted ads have been going live at **0 €**. The cause is the same class of
+bug as the description: the price and postcode were filled with the native value
+setter, which writes the DOM but never reaches Tori's app state. Price is not
+validated, so nothing complains — the ad simply publishes at 0 €.
+
+`ToriListing.set_number()` now fills price and postcode with `Input.insertText`
+instead, mirroring the description fix.
+
+> **This fix is not yet verified end to end.** Unlike the description — where
+> success is visible because `aria-invalid` clears and *Jatka* unlocks — price
+> has no observable in the form. The only way to confirm it is to publish and
+> read the price back off the live ad. Treat the price path as unproven until
+> someone does that.
+
+To confirm manually: publish a listing with a distinctive price, then
+`python -m tori.cli search "<title>" --near "<your area>"` and check the price it
+reports.
+
 ## 1. The description field — solved, and why it looked impossible
 
 **It works now.** Set it with `Input.insertText` on the correct textarea. Two

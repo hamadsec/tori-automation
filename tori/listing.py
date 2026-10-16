@@ -89,13 +89,8 @@ class ToriListing:
           __setNative(el, %s); return {ok: el.value === %s, value: el.value};
         """ % (_q(listing.title), _q(listing.title)))
 
-        await self.step("price + postcode", """
-          const nums = __all(e => e.tagName === 'INPUT' && e.type === 'number'
-                              && e.getBoundingClientRect().width > 0);
-          if (nums.length < 2) return {ok: false, reason: 'expected 2 number inputs'};
-          __setNative(nums[0], %s); __setNative(nums[1], %s);
-          return {ok: true, price: nums[0].value, postcode: nums[1].value};
-        """ % (_q(listing.price), _q(listing.postcode)))
+        await self.set_number(0, listing.price, "price")
+        await self.set_number(1, listing.postcode, "postcode")
 
         # Images upload before the description: each photo adds a "Kuvateksti"
         # caption box, and the description is identified by NOT being one of
@@ -110,6 +105,41 @@ class ToriListing:
     # picking "the first textarea" silently types into a photo caption instead.
     DESC_SELECTOR = ("__all(e => e.tagName === 'TEXTAREA'"
                      " && (e.placeholder || '') === '')")
+
+    # Visible number inputs, in order: price, then postcode.
+    NUM_SELECTOR = ("__all(e => e.tagName === 'INPUT' && e.type === 'number'"
+                    " && e.getBoundingClientRect().width > 0)")
+
+    async def set_number(self, idx: int, value: str, label: str):
+        """Fill a number input (price, postcode) with Input.insertText.
+
+        NOT __setNative: that writes the DOM value but never reaches Tori's app
+        state, so a price set that way publishes as **0 €** — silently, with no
+        validation error. This was live: every script-posted ad went up at 0 €.
+        """
+        r = await self.step(label + ": focus", """
+          const ns = %s;
+          if (ns.length <= %d) return {ok: false, reason: 'number input missing'};
+          const el = ns[%d];
+          el.focus();
+          const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value');
+          if (d && d.set) d.set.call(el, '');
+          el.dispatchEvent(new Event('input', {bubbles: true}));
+          return {ok: true};
+        """ % (self.NUM_SELECTOR, idx, idx))
+        if not (r or {}).get("ok"):
+            return r
+        await asyncio.sleep(0.6)
+        await self.c.send("Input.insertText", text=str(value))
+        await asyncio.sleep(1.0)
+        return await self.step(label, """
+          const ns = %s;
+          const el = ns.length > %d ? ns[%d] : null;
+          const want = %s;
+          const got = el ? el.value.replace(/[^0-9.,]/g, '') : null;
+          return {ok: !!el && got === want.replace(/[^0-9.,]/g, ''),
+                  value: el ? el.value : null, wanted: want};
+        """ % (self.NUM_SELECTOR, idx, idx, _q(str(value))))
 
     async def set_description(self, text: str):
         """Type the description with Input.insertText.
