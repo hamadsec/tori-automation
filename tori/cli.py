@@ -72,19 +72,24 @@ def _cmd_create(args):
     try:
         url = asyncio.run(listing.create(item, dry_run=args.dry_run))
     except RuntimeError as e:
-        print(f"\nCould not fill the form: {e}")
-        if "login" in str(e).lower() or "create" in str(e).lower():
-            print("\nMost likely you are not logged in to Tori in the automation "
-                  "window.\nOpen it, log in (email one-time code), then re-run. "
+        msg = str(e)
+        print(f"\nCould not complete the listing: {msg}")
+        if "not logged in" in msg or "/auth" in msg or "login" in msg:
+            print("\nYou are not logged in to Tori in the automation window.\n"
+                  "Open it, log in (email one-time code), then re-run. "
                   "`python -m tori.cli doctor` tells you which.")
         return 1
     print("\nended at:", url)
     if args.dry_run:
         print("DRY RUN — form filled, not submitted.")
+    elif "/ad-receipt" in url or "/my-items" in url:
+        ad_id = url.split("adId=")[1].split("&")[0] if "adId=" in url else ""
+        print(f"PUBLISHED — ad {ad_id}." if ad_id else "PUBLISHED.")
+        print("Tori shows it as Under review until they approve it. Confirm it "
+              "is really there at https://www.tori.fi/my-items")
     else:
-        print("Next steps (delivery / package / publish) are manual for now — "
-              "they are still open in the browser, and the description usually "
-              "needs typing by hand first. See docs/LIMITATIONS.md.")
+        print("Stopped before publishing — still on:", url)
+        print("See docs/LIMITATIONS.md.")
 
 
 def _login_state() -> str:
