@@ -60,6 +60,8 @@ def _cmd_create(args):
         description=desc,
         images=images,
         postcode=args.postcode,
+        category=tuple(c.strip() for c in args.category.split(",")) if args.category
+                 else listing.DEFAULT_CATEGORY,
         condition=args.condition,
         material=args.material,
     )
@@ -239,6 +241,8 @@ def main(argv=None):
     c.add_argument("--desc-file")
     c.add_argument("--images", nargs="*", default=[])
     c.add_argument("--postcode", default="00100")
+    c.add_argument("--category", default=None,
+                   help='comma-separated path, e.g. "Piha ja remontointi,Piha ja puutarha,Kasvit ja istutus"')
     c.add_argument("--condition", default=None, help='e.g. "Hyvä"')
     c.add_argument("--material", default=None, help='e.g. "Nahka"')
     c.add_argument("--dry-run", action="store_true", help="fill but do not submit")
