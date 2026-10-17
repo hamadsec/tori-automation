@@ -48,6 +48,13 @@ wasted time, so the next person does not repeat them.
   coords → shadow-inner → host and stops as soon as the URL actually moves.
   A click that "does nothing" while validation is failing is a validation
   problem, not a click problem.
+- **Numeric fields are labelled on the host, not by `<label for=…>`.** Price,
+  postcode and the Korkeus/Leveys/Syvyys trio are all `<w-textfield>` custom
+  elements with `label="Hinta"` / `label="Postinumero"` / … as an **attribute**,
+  and their inner `input` lives in the shadow root. Address them by that label.
+  Addressing them by position in the DOM works right up until a category adds
+  dimension fields, at which point the price goes into Korkeus and the postcode
+  into Leveys — silently (see docs/LIMITATIONS.md §0b).
 - **Each uploaded photo adds its own caption textarea** (`placeholder="Kuvateksti"`).
   `__find(e => e.tagName === 'TEXTAREA')` therefore returns a *caption*, not the
   listing description — the description is the textarea that is **not** a
@@ -74,7 +81,10 @@ wasted time, so the next person does not repeat them.
   draft server-side and the images come back with it. Useful escape hatch when the
   SPA renders a blank form after a file dialog.
 
-## Verified category path (clothing accessories)
+## Verified category paths
+
+All verified against the live form; values change, the texts have been stable.
+Address them by text.
 
 ```
 Osasto      Vaatteet, kosmetiikka ja asusteet   (value 71)
@@ -84,7 +94,32 @@ Kunto       Hyvä                                (value 3)
 Materiaali  Nahka                               (value 2)
 ```
 
-Values change; the texts have been stable. Address them by text.
+```
+Osasto      Koti ja sisustus                    (value 78)
+Alaluokka   Valaisimet                          (value 5181)
+Tuoteryhmä  Kattovalaisimet                     (value 226)
+Kunto       Hyvä                                (value 3)
+```
+
+```
+Osasto      Koti ja sisustus                    (value 78)
+Alaluokka   Pöydät ja tuolit                    (value 5196)
+Tuoteryhmä  Sohvapöydät                         (value 212)
+Kunto       Hyvä                                (value 3)
+```
+
+```
+Osasto      Koti ja sisustus                    (value 78)
+Alaluokka   Hyllyt ja lipastot                  (value 8345)
+Tuoteryhmä  TV-tasot ja mediakalusteet          (value 224)
+Kunto       Hyvä                                (value 3)
+```
+
+The two `Koti ja sisustus` furniture paths (**Pöydät ja tuolit**, **Hyllyt ja
+lipastot**) also expose **Korkeus / Leveys / Syvyys**; the lamp path and the
+clothing path do not. Dump the live options with
+`python -m tori.cli categories "Koti ja sisustus" "Hyllyt ja lipastot"` rather
+than trusting this list.
 
 ## The search pages
 

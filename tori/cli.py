@@ -4,6 +4,14 @@
     python -m tori.cli create --title "..." --price 25 --desc-file d.txt \
         --images a.jpg b.jpg --postcode 00100 [--dry-run]
     python -m tori.cli browser            # launch the dedicated Chrome
+    python -m tori.cli doctor             # is the environment + login OK?
+    python -m tori.cli categories "Koti ja sisustus" "Valaisimet"
+    python -m tori.cli screenshot --out form.png
+    python -m tori.cli fix-price  --ad <adId> --price 50
+    python -m tori.cli fix-fields --ad <adId> --postcode 02230 --height 45
+
+`create` publishes unless `--dry-run` is passed. `fix-price` and `fix-fields`
+patch Tori's own save request, then read the stored ad back.
 """
 from __future__ import annotations
 
@@ -348,6 +356,78 @@ def _cmd_fix_fields(args):
     return asyncio.run(run())
 
 
+def _cmd_categories(args):
+    """Print the create-form dropdowns (and label-addressable number fields).
+
+    Tori's controls live inside shadow roots, so `document.querySelector` sees
+    nothing; this opens the real form and prints what is actually there, which
+    is how a category path gets discovered instead of guessed. Options are
+    matched by visible text (exact first, then prefix), so a partial label like
+    "Valaisimet" is enough.
+
+    Note: opening the form creates a new **draft** ad at
+    `/recommerce/create/<adId>`. Throwaway drafts are harmless — do not reuse
+    their ids.
+    """
+    import asyncio
+
+    from . import cdp, listing, page
+
+    if not cdp.is_running():
+        print("Nothing is listening on the CDP port — run: python -m tori.cli browser")
+        return 1
+
+    async def run():
+        ws, _ = cdp.page_target(port=cdp.default_port())
+        async with cdp.CDP(ws) as c:
+            await c.send("Runtime.enable")
+            await c.send("DOM.enable")
+            t = listing.ToriListing(c)
+            print("URL:", await t.open_form())
+            for ch in args.choices:
+                r = await t.set_select(ch, label=f"choose {ch}")
+                await asyncio.sleep(3)   # the next combo exists only after this one
+                if not (r or {}).get("ok"):
+                    print("FAILED at", ch, r)
+                    return 1
+            sels = await c.eval(page.wrap("return __selects();")) or []
+            for i, s in enumerate(sels):
+                print(f"--- select {i} (value={s['value']}) ---")
+                for o in s["options"]:
+                    print("   ", o["t"])
+            nums = await c.eval(page.wrap("return __numberFieldLabels();")) or []
+            print("--- number fields (address by label) ---")
+            for n in nums:
+                print("   ", n or "(unlabelled)")
+        return 0
+
+    return asyncio.run(run())
+
+
+def _cmd_screenshot(args):
+    """Full-page PNG of the current Tori tab — for checking a --dry-run fill."""
+    import asyncio
+    import os
+
+    from . import cdp
+
+    if not cdp.is_running():
+        print("Nothing is listening on the CDP port — run: python -m tori.cli browser")
+        return 1
+    out = os.path.abspath(os.path.expanduser(args.out))
+
+    async def run():
+        ws, _ = cdp.page_target(port=cdp.default_port())
+        async with cdp.CDP(ws) as c:
+            await c.send("Page.enable")
+            path = await c.screenshot(out, full_page=True)
+            print(path)
+            print("tab:", await c.eval("location.href"))
+        return 0
+
+    return asyncio.run(run())
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="tori", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -391,6 +471,16 @@ def main(argv=None):
 
     t = sub.add_parser("targets", help="list CDP page targets")
     t.set_defaults(func=_cmd_targets)
+
+    cat = sub.add_parser("categories",
+                         help="print the create-form dropdowns (and number-field labels)")
+    cat.add_argument("choices", nargs="*",
+                     help='category choices already made, e.g. "Koti ja sisustus" "Valaisimet"')
+    cat.set_defaults(func=_cmd_categories)
+
+    sh = sub.add_parser("screenshot", help="full-page PNG of the current Tori tab")
+    sh.add_argument("--out", default="tori-form.png")
+    sh.set_defaults(func=_cmd_screenshot)
 
     f = sub.add_parser("fix-price", help="set the price on an existing ad")
     f.add_argument("--ad", required=True, help="ad id")

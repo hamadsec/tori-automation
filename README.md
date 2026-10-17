@@ -57,7 +57,7 @@ back — the form is not evidence.
 ## Install
 
 ```bash
-git clone https://github.com/<you>/tori-automation
+git clone https://github.com/hamadsec/tori-automation
 cd tori-automation
 pip install -r requirements.txt        # just: websockets
 ```
@@ -169,6 +169,24 @@ category. The path is the three visible Finnish labels, comma-separated
 --category "Piha ja remontointi,Piha ja puutarha,Kasvit ja istutus"
 ```
 
+Do not guess a path: print the live tree, one level at a time, with
+
+```bash
+python -m tori.cli categories                                  # Osasto
+python -m tori.cli categories "Koti ja sisustus"               # Alaluokka
+python -m tori.cli categories "Koti ja sisustus" "Valaisimet"  # Tuoteryhmä + Kunto
+```
+
+It also lists the labelled number fields, which is how you find out whether the
+category asks for `Korkeus/Leveys/Syvyys`. Each run opens a new draft ad —
+harmless, but do not reuse those ids.
+
+To look at a `--dry-run` fill before publishing, screenshot the form:
+
+```bash
+python -m tori.cli screenshot --out /tmp/tori-form.png
+```
+
 Write the title and description in Finnish; the audience is Finnish-language.
 
 Add `--height/--width/--depth` (cm) on the categories that show
@@ -195,6 +213,7 @@ item = listing.Listing(
     category=("Vaatteet", "Laukut ja lompakot", "Reput"),   # Osasto / Alaluokka / Tuoteryhmä
     condition="Hyvä",
     material="Nahka",
+    dimensions={"Korkeus": 45, "Leveys": 92, "Syvyys": 55},  # only where the category asks
 )
 print(asyncio.run(listing.create(item, dry_run=True)))
 ```
@@ -217,13 +236,17 @@ haversine from an origin you geocode once.
 **Create** — the form is a client-side app and its controls live **inside shadow
 roots**, so `document.querySelector` finds nothing and every helper walks shadow
 roots recursively. Category pickers are real `<select>` elements that appear one
-after another (Osasto → Alaluokka → Tuoteryhmä → Kunto → Materiaali →
-Sukupuoli) and they all share the id `select_id`, so they are addressed by
-option text instead. The photo input is a real `input[type=file]`, uploaded with
+after another (Osasto → Alaluokka → Tuoteryhmä, then Kunto and — depending on the
+category — Materiaali, Sukupuoli, or the Korkeus/Leveys/Syvyys trio) and they all
+share the id `select_id`, so they are addressed by option text instead. The
+numeric fields are `<w-textfield>` custom elements whose label is an **attribute
+on the host**, so they are addressed by label too — `w-textfield[label="Hinta"]`
+— never by position. The photo input is a real `input[type=file]`, uploaded with
 `DOM.setFileInputFiles` and an `objectId` — which is why there is no file dialog
 in this tool at all.
 
-Two things about the funnel are easy to get wrong, and both fail *silently*:
+Three things about the funnel are easy to get wrong, and all of them fail
+*silently*:
 
 - The **description** is only accepted via `Input.insertText` on the right
   textarea. Every uploaded photo adds its own caption box, so "the first
@@ -231,11 +254,17 @@ Two things about the funnel are easy to get wrong, and both fail *silently*:
   required forever.
 - The **pickup-only delivery radio is not pre-selected**. With no radio checked,
   *Jatka* refuses to advance and shows nothing.
+- The **price is neither required nor validated**, so an ad whose price did not
+  register simply publishes at 0 €. The code writes it into the field *and*
+  Tori's save request, then reads it back from the API after publishing —
+  see [docs/LIMITATIONS.md](docs/LIMITATIONS.md) §0.
 
-Price is the third silent one: it is neither required nor validated, so an ad
-whose price did not register simply publishes at 0 €. The code writes it into the
-field *and* Tori's save request, then reads it back from the API after publishing
-— see [docs/LIMITATIONS.md](docs/LIMITATIONS.md) §0.
+The **postcode and dimensions** fail the same silent way, and position-addressed
+fields made it worse on the categories that ask for dimensions: the price landed
+in Korkeus and the postcode in Leveys, leaving the ad at the seller's profile
+location with nonsense measurements. Fixed by addressing fields by label, and
+repairable with `fix-fields` — see
+[docs/LIMITATIONS.md](docs/LIMITATIONS.md) §0b.
 
 More detail, including every dead end worth not repeating, is in
 [docs/FINDINGS.md](docs/FINDINGS.md) and [docs/LIMITATIONS.md](docs/LIMITATIONS.md).

@@ -12,6 +12,6 @@ Buying (no browser needed):
 
 __version__ = "0.1.0"
 
-from . import browser, cdp, listing, page, search  # noqa: F401
+from . import browser, cdp, listing, page, price, search  # noqa: F401
 
-__all__ = ["browser", "cdp", "listing", "page", "search", "__version__"]
+__all__ = ["browser", "cdp", "listing", "page", "price", "search", "__version__"]
