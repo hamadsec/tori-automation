@@ -210,6 +210,8 @@ def _cmd_doctor(args):
     if ok:
         print('  python -m tori.cli search "kenkäteline" --near "Kallio, Helsinki, Finland"')
         print("  python -m tori.cli create --title ... --price ... --dry-run")
+        print('  python -m tori.cli categories "Koti ja sisustus"')
+        print("  python -m tori.cli screenshot --out form.png")
     return 0 if ok else 1
 
 
