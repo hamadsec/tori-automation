@@ -20,7 +20,8 @@ Both are plain Python. The only third-party dependency is `websockets`.
 | Item coordinates, district, condition, reserved flag, shipping flag | ✅ works |
 | Distance ranking with audit trail | ✅ works |
 | Open the create form, pick category chain / condition / material | ✅ works |
-| Title, **description**, postcode | ✅ works |
+| Title, **description**, postcode | ✅ works — postcode by its label, and it is what sets the ad's location |
+| **Korkeus / Leveys / Syvyys** (only on categories that ask) | ✅ works — `--height/--width/--depth`, addressed by label |
 | **Price** | ✅ works and is verified after publishing — written into both the form field and Tori's own save request (`tori/price.py`), then read back from Tori's API. Price alone fails *silently* (an ad with no price goes live at 0 €), so never trust the form |
 | **Photo upload** (bypasses the file dialog) | ✅ works |
 | Steps after *Jatka* (delivery, package, **publish**) | ✅ scripted — one command publishes |
@@ -35,6 +36,22 @@ The price of an ad that already exists can be corrected with:
 ```bash
 python -m tori.cli fix-price --ad <adId> --price 50
 ```
+
+The **postcode and the dimension fields can fail the same silent way**, and on
+categories that ask for `Korkeus`/`Leveys`/`Syvyys` they used to be written into
+the wrong boxes entirely (price → Korkeus, postcode → Leveys), which left the ad
+in the seller's *profile* location with nonsense measurements. Numeric fields are
+now addressed by their visible label, and an ad that is already wrong can be
+repaired:
+
+```bash
+python -m tori.cli fix-fields --ad <adId> --postcode 02230 \
+    --postalname "Espoo, Matinkylä, Uusimaa" --lat 60.155226521 --lon 24.746018667 \
+    --height 45 --width 92 --depth 55
+```
+
+See [docs/LIMITATIONS.md](docs/LIMITATIONS.md) §0b. Always read the stored ad
+back — the form is not evidence.
 
 
 ## Install
@@ -153,6 +170,13 @@ category. The path is the three visible Finnish labels, comma-separated
 ```
 
 Write the title and description in Finnish; the audience is Finnish-language.
+
+Add `--height/--width/--depth` (cm) on the categories that show
+`Korkeus`/`Leveys`/`Syvyys` (e.g. `Koti ja sisustus,Pöydät ja tuolit,…`,
+`Koti ja sisustus,Hyllyt ja lipastot,…`). On categories without them the fields
+are skipped with a note, not an error. `--postcode` sets the ad's location — it
+is the field that decides Matinkylä vs. the profile default, so read the stored
+ad back and check `address.postalcode`.
 
 As a library:
 

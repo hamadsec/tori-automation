@@ -64,6 +64,9 @@ def _cmd_create(args):
                  else listing.DEFAULT_CATEGORY,
         condition=args.condition,
         material=args.material,
+        dimensions={k: v for k, v in (("Korkeus", args.height),
+                                      ("Leveys", args.width),
+                                      ("Syvyys", args.depth)) if v is not None},
     )
     if not browser.cdp.is_running():
         print("Nothing is listening on the CDP port yet.\n")
@@ -271,6 +274,80 @@ def _cmd_fix_price(args):
 
 
 
+def _cmd_fix_fields(args):
+    """Repair stored fields on an existing ad (location and/or dimensions).
+
+    Why this exists: price is not the only field that can be silently wrong.
+    Tori's own save payload (``PUT /recommerce/create/api/item/<ad>``) carries
+    the postcode and the Korkeus/Leveys/Syvyys trio, so both are patched at the
+    request level the same way the price is — the form's own state is not
+    trusted, and a field written by ``Input.insertText`` can be dropped without
+    any error. Note the *location* comes from the postcode field: an ad whose
+    postcode never registered keeps the profile's default location, which looks
+    right to the seller and wrong to every buyer.
+    """
+    import asyncio
+
+    from . import cdp, listing, price
+
+    ad = str(args.ad)
+    if not cdp.is_running():
+        print("Nothing is listening on the CDP port — run: python -m tori.cli browser")
+        return 1
+
+    extra = {}
+    for label, value in (("height", args.height), ("width", args.width),
+                         ("depth", args.depth)):
+        if value is not None:
+            extra[label] = value
+    if args.postcode:
+        address = {"postalcode": str(args.postcode), "country": "FI"}
+        if args.postalname:
+            address["postalname"] = args.postalname
+        if args.lat:
+            address["latitude"] = str(args.lat)
+        if args.lon:
+            address["longitude"] = str(args.lon)
+        extra["address"] = address
+    if not extra:
+        print("nothing to fix — pass --postcode and/or --height/--width/--depth")
+        return 2
+
+    async def run():
+        ws, _ = cdp.page_target(port=cdp.default_port())
+        async with cdp.CDP(ws) as c:
+            await c.send("Runtime.enable")
+            await c.send("DOM.enable")
+            t = listing.ToriListing(c)
+            await c.navigate(
+                f"https://www.tori.fi/recommerce/create/{ad}?editMode=true", wait=10)
+            print("before:", await t.read_price(ad), "€;", extra)
+            state = await price.patch_with(
+                c, ad, None, click_step=lambda mode: t._click_once("Tallenna", mode),
+                extra=extra)
+            print("patched requests:", state["patched"])
+            if not state["patched"]:
+                print("no save request was intercepted — the ad was not changed")
+                return 1
+            await asyncio.sleep(2)
+            # the edit funnel finishes with another Tallenna on the delivery step
+            await t.click_until("Tallenna", "location.href.indexOf('/delivery/') < 0",
+                                label="save delivery")
+            await asyncio.sleep(3)
+            r = await c.eval(
+                "(async () => {"
+                f" const r = await fetch('https://www.tori.fi/recommerce/create/api/item/{ad}',"
+                " {credentials:'include', headers:{'Accept':'application/json'}});"
+                " const j = await r.json(); const d = j.data || j;"
+                " return {price: d.price, height: d.height, width: d.width,"
+                "         depth: d.depth, address: d.address};"
+                "})()", await_promise=True)
+            print("after:", r)
+        return 0
+
+    return asyncio.run(run())
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="tori", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -299,6 +376,10 @@ def main(argv=None):
                    help='comma-separated path, e.g. "Piha ja remontointi,Piha ja puutarha,Kasvit ja istutus"')
     c.add_argument("--condition", default=None, help='e.g. "Hyvä"')
     c.add_argument("--material", default=None, help='e.g. "Nahka"')
+    c.add_argument("--height", default=None, type=int,
+                   help="Korkeus in cm — only categories that ask for dimensions")
+    c.add_argument("--width", default=None, type=int, help="Leveys in cm")
+    c.add_argument("--depth", default=None, type=int, help="Syvyys in cm")
     c.add_argument("--dry-run", action="store_true", help="fill but do not submit")
     c.set_defaults(func=_cmd_create)
 
@@ -315,6 +396,19 @@ def main(argv=None):
     f.add_argument("--ad", required=True, help="ad id")
     f.add_argument("--price", required=True, type=int, help="price in €")
     f.set_defaults(func=_cmd_fix_price)
+
+    g = sub.add_parser("fix-fields",
+                       help="repair stored fields (location, dimensions) on an existing ad")
+    g.add_argument("--ad", required=True, help="ad id")
+    g.add_argument("--postcode", default=None, help="new postcode (e.g. 02230)")
+    g.add_argument("--postalname", default=None,
+                   help='postal name as Tori prints it, e.g. "Espoo, Matinkylä, Uusimaa"')
+    g.add_argument("--lat", default=None)
+    g.add_argument("--lon", default=None)
+    g.add_argument("--height", default=None, type=int, help="Korkeus in cm")
+    g.add_argument("--width", default=None, type=int, help="Leveys in cm")
+    g.add_argument("--depth", default=None, type=int, help="Syvyys in cm")
+    g.set_defaults(func=_cmd_fix_fields)
 
     args = ap.parse_args(argv)
     return args.func(args)

@@ -74,6 +74,54 @@ correctly while the stored ad has no price at all. Never verify from the form
 alone.
 
 
+## 0b. Location and dimensions — addressed by label, never by index
+
+**The trap.** The numeric inputs used to be found by index — "the visible number
+inputs, in order: price, then postcode". That is only true on categories with no
+extra numeric fields. Some categories (**Pöydät ja tuolit**, **Hyllyt ja
+lipastot**) insert **Korkeus / Leveys / Syvyys** ahead of Hinta and Postinumero,
+so on those the write went: price → `Korkeus`, postcode → `Leveys`. Nothing
+errors, nothing looks wrong in the form (the boxes show the numbers that were
+typed), and the damage is only visible in the stored ad.
+
+Live example — ad 48645829 (*IKEA LACK -sohvapöytä*), meant to be 10 € at 02230:
+
+```
+height: 10        ← the price
+width:  2230      ← the postcode, leading zero dropped
+address.postalcode: 02650   ← the profile default, because Postinumero was never filled
+```
+
+So the listing read **"Korkeus 10 cm, Leveys 2230 cm"** and sat in the seller's
+*profile* location (Pohjois-Leppävaara) instead of Matinkylä. The price itself
+survived only because it is patched into the save request (§0).
+
+**The fix.** Address numeric fields by their visible label. Tori's numeric inputs
+are `<w-textfield>` custom elements and the label is an **attribute on the host**,
+not a `<label for=…>` — `__numberField("Hinta")` walks shadow roots for a
+`w-textfield[label="Hinta"]` and returns its inner `input`. Price and postcode are
+always present; `Korkeus`/`Leveys`/`Syvyys` only on categories that ask for them,
+which is why a missing dimension field is a warning, not a failure.
+
+**Repairing an ad whose fields are already wrong.** The save payload
+(`PUT /recommerce/create/api/item/<ad>`) carries `address`, `height`, `width` and
+`depth`, so they are patched the same way the price is — the form's state is not
+trusted:
+
+```bash
+python -m tori.cli fix-fields --ad 48645829 --postcode 02230 \
+    --postalname "Espoo, Matinkylä, Uusimaa" --lat 60.155226521 --lon 24.746018667 \
+    --height 45 --width 92 --depth 55
+```
+
+Verified: 48645829 now reads `height 45, width 92, depth 55`, address 02230
+Matinkylä, price unchanged at 10 €.
+
+**Always read the stored ad back** (`GET /recommerce/create/api/item/<ad>`) after
+publishing — price, `address.postalcode` and the dimension trio. The form is not
+evidence.
+
+
 ## 1. The description field — solved, and why it looked impossible
 
 **It works now.** Set it with `Input.insertText` on the correct textarea. Two

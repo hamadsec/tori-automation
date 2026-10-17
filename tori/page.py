@@ -55,6 +55,25 @@ function __setSelectByText(text, prefix) {
   return {ok: false, reason: 'option not found: ' + text,
           available: sels.map(s => [...s.options].map(o => o.text.trim()))};
 }
+function __numberField(label) {
+  // Tori's numeric inputs are <w-textfield> custom elements whose visible
+  // label lives on the HOST's label attribute, not on a <label for=...>.
+  // Addressing them by index breaks the moment a category adds extra numeric
+  // fields (Korkeus/Leveys/Syvyys), so address them by label instead.
+  const hosts = __all(e => (e.tagName === 'W-TEXTFIELD')
+                        && (e.getAttribute('label') || '').trim() === label);
+  for (const h of hosts) {
+    const inp = h.shadowRoot ? h.shadowRoot.querySelector('input')
+                             : h.querySelector('input');
+    if (inp) return inp;
+  }
+  return null;
+}
+function __numberFieldLabels() {
+  return __all(e => e.tagName === 'W-TEXTFIELD')
+    .filter(h => h.shadowRoot && h.shadowRoot.querySelector('input[type=number]'))
+    .map(h => (h.getAttribute('label') || '').trim());
+}
 function __clickText(text) {
   const el = __find(e => {
     const t = (e.innerText || '').trim();

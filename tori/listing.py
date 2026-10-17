@@ -39,6 +39,10 @@ class Listing:
     category: tuple = DEFAULT_CATEGORY          # (Osasto, Alaluokka, Tuoteryhmä)
     condition: str | None = None                # e.g. "Hyvä"
     material: str | None = None                 # e.g. "Nahka"
+    # Optional dimension fields, keyed by the form's own Finnish labels —
+    # only some categories show them. e.g. {"Korkeus": 45, "Leveys": 92,
+    # "Syvyys": 55}. Left empty, nothing is written.
+    dimensions: dict = field(default_factory=dict)
     skip_shipping: bool = True                  # True → pickup only (no ToriDiili)
 
 
@@ -94,8 +98,17 @@ class ToriListing:
           __setNative(el, %s); return {ok: el.value === %s, value: el.value};
         """ % (_q(listing.title), _q(listing.title)))
 
-        await self.set_number(0, listing.price, "price")
-        await self.set_number(1, listing.postcode, "postcode")
+        await self.set_number("Hinta", listing.price, "price")
+        await self.set_number("Postinumero", listing.postcode, "postcode")
+        # Some categories (e.g. Pöydät ja tuolit, Hyllyt ja lipastot) also ask
+        # for Korkeus/Leveys/Syvyys. Fill them only when given; a missing field
+        # is not an error (most categories do not have them).
+        for lbl, val in (listing.dimensions or {}).items():
+            if val in (None, ""):
+                continue
+            r = await self.set_number(lbl, val, f"dimension {lbl.lower()}")
+            if not (r or {}).get("ok") and self.verbose:
+                print(f"  --  dimension {lbl} not on this category, skipped")
 
         # Images upload before the description: each photo adds a "Kuvateksti"
         # caption box, and the description is identified by NOT being one of
@@ -111,12 +124,17 @@ class ToriListing:
     DESC_SELECTOR = ("__all(e => e.tagName === 'TEXTAREA'"
                      " && (e.placeholder || '') === '')")
 
-    # Visible number inputs, in order: price, then postcode.
-    NUM_SELECTOR = ("__all(e => e.tagName === 'INPUT' && e.type === 'number'"
-                    " && e.getBoundingClientRect().width > 0)")
+    # Visible number inputs are addressed by their visible label ("Hinta",
+    # "Postinumero", and — on categories that ask for them — "Korkeus",
+    # "Leveys", "Syvyys"). NEVER by index: a category with dimension fields
+    # inserts them ahead of price/postcode, so index 0/1 silently writes the
+    # price into Korkeus and the postcode into Leveys — which publishes an ad
+    # at the profile's default location with nonsense dimensions. That happened
+    # to ad 48645829 (height 10, width 2230, postcode 02650).
 
-    async def set_number(self, idx: int, value: str, label: str):
-        """Fill a number input (price, postcode) with Input.insertText.
+    async def set_number(self, field_label: str, value: str,
+                         label: str | None = None) -> dict:
+        """Fill a labelled number input (price, postcode, dimensions).
 
         NOT ``__setNative``: that writes the DOM value but never reaches Tori's
         app state, so a price set that way publishes as **0 €** — silently, with
@@ -128,29 +146,29 @@ class ToriListing:
         the price is *also* patched into the save request — see
         ``tori/price.py`` — and read back afterwards.
         """
-        r = await self.step(label + ": focus", """
-          const ns = %s;
-          if (ns.length <= %d) return {ok: false, reason: 'number input missing'};
-          const el = ns[%d];
+        name = label or field_label.lower()
+        r = await self.step(name + ": focus", """
+          const el = __numberField(%s);
+          if (!el) return {ok: false, reason: 'no number field labelled ' + %s,
+                           fields: __numberFieldLabels()};
           el.focus();
           const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value');
           if (d && d.set) d.set.call(el, '');
           el.dispatchEvent(new Event('input', {bubbles: true}));
           return {ok: true};
-        """ % (self.NUM_SELECTOR, idx, idx))
+        """ % (_q(field_label), _q(field_label)))
         if not (r or {}).get("ok"):
             return r
         await asyncio.sleep(0.6)
         await self.c.send("Input.insertText", text=str(value))
         await asyncio.sleep(1.0)
-        return await self.step(label, """
-          const ns = %s;
-          const el = ns.length > %d ? ns[%d] : null;
+        return await self.step(name, """
+          const el = __numberField(%s);
           const want = %s;
           const got = el ? el.value.replace(/[^0-9.,]/g, '') : null;
           return {ok: !!el && got === want.replace(/[^0-9.,]/g, ''),
                   value: el ? el.value : null, wanted: want};
-        """ % (self.NUM_SELECTOR, idx, idx, _q(str(value))))
+        """ % (_q(field_label), _q(str(value))))
 
     async def set_description(self, text: str):
         """Type the description with Input.insertText.

@@ -36,8 +36,14 @@ import base64
 import json
 
 
-def _patch_body(raw: str, price: int | str) -> str | None:
-    """Return the request body with the price set, or None if it is not ours."""
+def _patch_body(raw: str, price=None, extra: dict | None = None) -> str | None:
+    """Return the request body with the price and/or extra fields set.
+
+    ``extra`` is applied to the same ``data`` object the price goes into, so a
+    caller can repair other stored fields — ``height``/``width``/``depth``, or
+    a whole ``address`` object — through the same intercepted request. Returns
+    None when the body is not the item-save payload we are looking for.
+    """
     try:
         body = json.loads(raw)
     except Exception:
@@ -45,17 +51,23 @@ def _patch_body(raw: str, price: int | str) -> str | None:
     target = body.get("data") if isinstance(body.get("data"), dict) else body
     if not isinstance(target, dict):
         return None
-    target["price"] = {"price_amount": int(price)}
+    if price is not None:
+        target["price"] = {"price_amount": int(price)}
+    for key, value in (extra or {}).items():
+        target[key] = value
+    if price is None and not extra:
+        return None
     return json.dumps(body, ensure_ascii=False)
 
 
 class PricePatcher:
     """Intercepts Tori's own save request and injects the price into it."""
 
-    def __init__(self, client, ad_id: str, price):
+    def __init__(self, client, ad_id: str, price=None, extra: dict | None = None):
         self.c = client
         self.ad_id = str(ad_id)
         self.price = price
+        self.extra = extra or {}
         self.state = {"patched": [], "continued": 0}
 
     async def enable(self):
@@ -81,7 +93,7 @@ class PricePatcher:
             p = ev["params"]
             rid = p["requestId"]
             raw = p["request"].get("postData") or ""
-            new = _patch_body(raw, self.price) if f"/api/item/{self.ad_id}" in (
+            new = _patch_body(raw, self.price, self.extra) if f"/api/item/{self.ad_id}" in (
                 p["request"].get("url") or "") else None
             if new is None:
                 self.state["continued"] += 1
@@ -97,18 +109,20 @@ class PricePatcher:
         return patched
 
 
-async def patch_with(client, ad_id: str, price, click_step, modes=("coords", "inner", "host"),
-                     pumps: int = 8, settle: float = 0.7):
+async def patch_with(client, ad_id: str, price=None, click_step=None,
+                     modes=("coords", "inner", "host"), pumps: int = 8,
+                     settle: float = 0.7, extra: dict | None = None):
     """Install the patch, run *click_step* until Tori's save request is patched.
 
     *click_step* is an async callable taking one click method name (the CDP
     client here is single-threaded — one ``recv`` at a time — so the click and
     the pump cannot run concurrently; they alternate instead, which is also what
-    the working manual sequence did).
+    the working manual sequence did). *extra* adds fields to the same save
+    payload (e.g. a repaired ``address`` or ``height``/``width``/``depth``).
     """
     import asyncio
 
-    patcher = PricePatcher(client, ad_id, price)
+    patcher = PricePatcher(client, ad_id, price, extra)
     await patcher.enable()
     try:
         for mode in modes:
