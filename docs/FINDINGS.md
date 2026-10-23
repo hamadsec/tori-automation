@@ -115,6 +115,17 @@ Tuoteryhmä  TV-tasot ja mediakalusteet          (value 224)
 Kunto       Hyvä                                (value 3)
 ```
 
+```
+Osasto      Lapset ja vanhemmat
+Alaluokka   Lasten kalusteet
+Tuoteryhmä  Lastenhuoneen säilytyskalusteet
+Kunto       Hyvä                                (value 3)
+```
+
+The children's storage path (`Lapset ja vanhemmat` → `Lasten kalusteet` →
+`Lastenhuoneen säilytyskalusteet`) has **no** dimension fields — its number
+fields are just Hinta and Postinumero.
+
 The two `Koti ja sisustus` furniture paths (**Pöydät ja tuolit**, **Hyllyt ja
 lipastot**) also expose **Korkeus / Leveys / Syvyys**; the lamp path and the
 clothing path do not. Dump the live options with
